@@ -19,5 +19,8 @@ desktop.ini
 # Claude session state
 .claude/
 
+# Cloudflare Wrangler local state
+.wrangler/
+
 # Local
 node_modules/

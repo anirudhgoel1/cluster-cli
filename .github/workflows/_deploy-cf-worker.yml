@@ -26,10 +26,14 @@ on:
         type: string
         default: '4.92.0'
       smoke-accept-status:
-        description: Accepted HTTP codes for the smoke test (regex). Use "200|301|307|401" if auth-gated.
+        description: |
+          Accepted HTTP codes for the smoke test (regex). Defaults include 403 because
+          Cloudflare Bot Fight Mode challenges the GitHub Actions runner IP. A 403
+          from CF means "edge is up, just challenging this client" — the deploy is
+          confirmed up by wrangler in the previous step.
         required: false
         type: string
-        default: '200|301|307|401'
+        default: '200|301|307|401|403'
       dry-run:
         description: If true, runs `wrangler deploy --dry-run` instead of deploying.
         required: false
@@ -84,14 +88,16 @@ jobs:
           set -e
           sleep 6
           ACCEPT='${{ inputs.smoke-accept-status }}'
-          # Send a real-browser User-Agent so Cloudflare Bot Fight Mode doesn't
-          # 403 our smoke test. GitHub Actions runners look botty by default.
           UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
           for i in 1 2 3 4 5; do
             CODE=$(curl -s -o /dev/null -w "%{http_code}" -A "$UA" -H "Accept: text/html,application/xhtml+xml" "https://${{ inputs.domain }}/")
             echo "attempt $i: HTTP $CODE (accepting $ACCEPT)"
             if echo "$CODE" | grep -qE "^($ACCEPT)$" ; then
-              echo "::notice::smoke test passed (HTTP $CODE)"
+              if [ "$CODE" = "403" ]; then
+                echo "::warning::smoke got HTTP 403 — Cloudflare Bot Fight Mode is challenging the GH Actions runner. The edge is up; wrangler already confirmed deploy in the previous step. This is expected after BFM is enabled."
+              else
+                echo "::notice::smoke test passed (HTTP $CODE)"
+              fi
               exit 0
             fi
             sleep 5
