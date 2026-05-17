@@ -1,0 +1,97 @@
+name: deploy-cf-worker (reusable)
+
+# Single source of truth for cluster deploys. Every app's deploy.yml
+# calls this via `uses:`. Update once, all apps benefit.
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        description: Public domain to smoke-test after deploy (no scheme).
+        required: true
+        type: string
+      working-directory:
+        description: Subdirectory containing wrangler.toml (e.g. "hosted" for Pit Wall, "." for the rest).
+        required: false
+        type: string
+        default: '.'
+      node-version:
+        description: Node version. Must be >=22 for wrangler 4.92+.
+        required: false
+        type: string
+        default: '22'
+      wrangler-version:
+        description: Pinned wrangler version for reproducibility.
+        required: false
+        type: string
+        default: '4.92.0'
+      smoke-accept-status:
+        description: Accepted HTTP codes for the smoke test (regex). Use "200|301|307|401" if auth-gated.
+        required: false
+        type: string
+        default: '200|301|307|401'
+      dry-run:
+        description: If true, runs `wrangler deploy --dry-run` instead of deploying.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: H2 em-dash audit (warn-only · H2 hygiene)
+        continue-on-error: true
+        run: |
+          # Surfaces em-dashes in user-facing copy as warnings, never a deploy blocker.
+          # Skips: <div>—</div> placeholders, code comments, string literals.
+          ROOT="${{ inputs.working-directory }}"
+          if grep -rn '—' "$ROOT" --include='*.html' --include='*.js' \
+            --exclude-dir=node_modules --exclude-dir=.wrangler --exclude-dir=_drafts \
+            2>/dev/null \
+            | grep -vE '^\s*//|^\s*\*|>—<|>\s*—\s*<|=\s*['"'"'"]—['"'"'"]' ; then
+            echo "::warning::em-dashes found in user-facing files (H2 hygiene). Review the lines above."
+          else
+            echo "✓ no em-dashes"
+          fi
+
+      - name: Deploy with Wrangler
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: ${{ inputs.dry-run && 'deploy --dry-run' || 'deploy' }}
+          workingDirectory: ${{ inputs.working-directory }}
+          wranglerVersion: ${{ inputs.wrangler-version }}
+
+      - name: Smoke test
+        if: ${{ !inputs.dry-run }}
+        run: |
+          set -e
+          sleep 6
+          ACCEPT='${{ inputs.smoke-accept-status }}'
+          for i in 1 2 3 4 5; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ inputs.domain }}/")
+            echo "attempt $i: HTTP $CODE (accepting $ACCEPT)"
+            if echo "$CODE" | grep -qE "^($ACCEPT)$" ; then
+              echo "::notice::smoke test passed (HTTP $CODE)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::smoke test failed after 5 attempts (last HTTP $CODE) against https://${{ inputs.domain }}/"
+          exit 1

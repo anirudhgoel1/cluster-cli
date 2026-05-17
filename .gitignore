@@ -1,0 +1,23 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# Secrets
+.env
+.env.*
+.dev.vars
+
+# Claude session state
+.claude/
+
+# Local
+node_modules/
