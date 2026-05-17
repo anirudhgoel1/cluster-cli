@@ -84,8 +84,11 @@ jobs:
           set -e
           sleep 6
           ACCEPT='${{ inputs.smoke-accept-status }}'
+          # Send a real-browser User-Agent so Cloudflare Bot Fight Mode doesn't
+          # 403 our smoke test. GitHub Actions runners look botty by default.
+          UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
           for i in 1 2 3 4 5; do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ inputs.domain }}/")
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -A "$UA" -H "Accept: text/html,application/xhtml+xml" "https://${{ inputs.domain }}/")
             echo "attempt $i: HTTP $CODE (accepting $ACCEPT)"
             if echo "$CODE" | grep -qE "^($ACCEPT)$" ; then
               echo "::notice::smoke test passed (HTTP $CODE)"
